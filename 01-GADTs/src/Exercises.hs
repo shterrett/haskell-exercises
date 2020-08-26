@@ -17,27 +17,31 @@ instance Countable Bool where count x = if x then 1 else 0
 -- things.
 
 data CountableList where
-  -- ...
+  Nil :: CountableList
+  Cons :: (Countable a) => a -> CountableList -> CountableList
 
 
 -- | b. Write a function that takes the sum of all members of a 'CountableList'
 -- once they have been 'count'ed.
 
 countList :: CountableList -> Int
-countList = error "Implement me!"
+countList (Cons a cl) = count a + countList cl
+countList Nil = 0
 
 
 -- | c. Write a function that removes all elements whose count is 0.
 
 dropZero :: CountableList -> CountableList
-dropZero = error "Implement me!"
+dropZero (Cons a cl) = if count a == 0
+                         then dropZero cl
+                         else Cons a (dropZero cl)
 
 
 -- | d. Can we write a function that removes all the things in the list of type
 -- 'Int'? If not, why not?
 
 filterInts :: CountableList -> CountableList
-filterInts = error "Contemplate me!"
+filterInts = error "Cannot implement; we have no type information about `a` except that it is `Countable`"
 
 
 
@@ -48,27 +52,33 @@ filterInts = error "Contemplate me!"
 -- | a. Write a list that can take /any/ type, without any constraints.
 
 data AnyList where
-  -- ...
+  ANil :: AnyList
+  ACons :: a -> AnyList -> AnyList
 
 -- | b. How many of the following functions can we implement for an 'AnyList'?
 
 reverseAnyList :: AnyList -> AnyList
-reverseAnyList = undefined
+reverseAnyList al = go al ANil
+  where go ANil rev = rev
+        go (ACons a al) rev = go al (ACons a rev)
 
-filterAnyList :: (a -> Bool) -> AnyList -> AnyList
-filterAnyList = undefined
+filterAnyList :: a -> Bool -> AnyList -> AnyList
+filterAnyList = error "don't know `a`, or anything else, so we can't write a predicate that typechecks"
 
 lengthAnyList :: AnyList -> Int
-lengthAnyList = undefined
+lengthAnyList ANil = 0
+lengthAnyList (ACons _ al) = 1 + lengthAnyList al
 
 foldAnyList :: Monoid m => AnyList -> m
-foldAnyList = undefined
+foldAnyList = error "they may all be monoids, but there's no guarantee they're the _same_ monoid. No parametricity here!"
 
 isEmptyAnyList :: AnyList -> Bool
-isEmptyAnyList = undefined
+isEmptyAnyList ANil = True
+isEmptyAnyList (ACons _ _) = False
 
 instance Show AnyList where
-  show = error "What about me?"
+  show ANil = "I'm an empty list of anything"
+  show (ACons _ _) = "I'm a list of anything, but I don't know how to show the things because there's no show constraint"
 
 
 
@@ -95,15 +105,20 @@ transformable2 = TransformWith (uncurry (++)) ("Hello,", " world!")
 -- | a. Which type variable is existential inside 'TransformableTo'? What is
 -- the only thing we can do to it?
 
+-- `input` is existential; all we can do is call the provided function with the
+-- provided input
+
 -- | b. Could we write an 'Eq' instance for 'TransformableTo'? What would we be
 -- able to check?
+
+instance (Eq o) => Eq (TransformableTo o) where
+  (TransformWith f x) == (TransformWith g y) = f x == g y
 
 -- | c. Could we write a 'Functor' instance for 'TransformableTo'? If so, write
 -- it. If not, why not?
 
-
-
-
+instance Functor TransformableTo where
+  fmap f (TransformWith g x) = TransformWith (f . g) x
 
 {- FOUR -}
 
@@ -115,15 +130,19 @@ data EqPair where
 -- | a. There's one (maybe two) useful function to write for 'EqPair'; what is
 -- it?
 
+areEqual :: EqPair -> Bool
+areEqual (EqPair a b) = a == b
+
 -- | b. How could we change the type so that @a@ is not existential? (Don't
 -- overthink it!)
+
+data EqPair' a where
+  EqPair' :: Eq a => a -> a -> EqPair' a
 
 -- | c. If we made the change that was suggested in (b), would we still need a
 -- GADT? Or could we now represent our type as an ADT?
 
-
-
-
+data EqPair'' a = (Eq a) => EqPair'' a a
 
 {- FIVE -}
 
@@ -148,19 +167,26 @@ getInt (IntBox int _) = int
 -- pattern-match:
 
 getInt' :: MysteryBox String -> Int
-getInt' _doSomeCleverPatternMatching = error "Return that value"
+getInt' (StringBox _ (IntBox i _)) = i
 
 -- | b. Write the following function. Again, don't overthink it!
 
 countLayers :: MysteryBox a -> Int
-countLayers = error "Implement me"
+countLayers EmptyBox = 0
+countLayers (IntBox _ mb) = 1 + countLayers mb
+countLayers (StringBox _ mb) = 1 + countLayers mb
+countLayers (BoolBox _ mb) = 1 + countLayers mb
 
 -- | c. Try to implement a function that removes one layer of "Box". For
 -- example, this should turn a BoolBox into a StringBox, and so on. What gets
 -- in our way? What would its type be?
 
-
-
+-- removeLayer :: MysteryBox a -> MysteryBox b
+-- removeLayer EmptyBox = EmptyBox
+-- removeLayer (IntBox _ mb) = mb
+-- removeLayer (StringBox _ mb) = mb
+-- removeLayer (BoolBox _ mb) = mb
+-- `b` isn't actually "free". The return type needs to depend on the input type
 
 
 {- SIX -}
@@ -180,8 +206,13 @@ exampleHList = HCons "Tom" (HCons 25 (HCons True HNil))
 -- need to pattern-match on HNil, and therefore the return type shouldn't be
 -- wrapped in a 'Maybe'!
 
+hhead :: HList (a, b) -> a
+hhead (HCons h _) = h
+
 -- | b. Currently, the tuples are nested. Can you pattern-match on something of
 -- type @HList (Int, String, Bool, ())@? Which constructor would work?
+
+-- No, the compiler can't figure out what `head` and `tail` are in `(head, tail)` becaues the tuples aren't nested
 
 patternMatchMe :: HList (Int, String, Bool, ()) -> Int
 patternMatchMe = undefined
@@ -189,8 +220,10 @@ patternMatchMe = undefined
 -- | c. Can you write a function that appends one 'HList' to the end of
 -- another? What problems do you run into?
 
-
-
+-- no, we need to unpack and repack the tuples into the types
+-- So some type level function like is necessary
+-- concatType (h, ()) l = (h, l)
+-- concatType (h, t) l = (h, concatType t l)
 
 
 {- SEVEN -}
