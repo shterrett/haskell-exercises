@@ -318,7 +318,13 @@ data Expr a where
 -- | a. Implement the following function and marvel at the typechecker:
 
 eval :: Expr a -> a
-eval = error "Implement me"
+eval (Equals x y) = eval x == eval y
+eval (Add x y) = eval x + eval y
+eval (If tst t f) = if (eval tst)
+                      then eval t
+                      else eval f
+eval (IntValue x) = x
+eval (BoolValue b) = b
 
 -- | b. Here's an "untyped" expression language. Implement a parser from this
 -- into our well-typed language. Note that (until we cover higher-rank
@@ -332,14 +338,37 @@ data DirtyExpr
   | DirtyBoolValue Bool
 
 parse :: DirtyExpr -> Maybe (Expr Int)
-parse = error "Implement me"
+parse = parseInt
+
+parseInt :: DirtyExpr -> Maybe (Expr Int)
+parseInt (DirtyEquals _ _) = Nothing
+parseInt (DirtyAdd e1 e2) = Add <$> parseInt e1 <*> parseInt e2
+parseInt (DirtyIf tst t f) = If <$> parseBool tst <*> parseInt t <*> parseInt f
+parseInt (DirtyIntValue x) = Just $ IntValue x
+parseInt (DirtyBoolValue _) = Nothing
+
+parseBool :: DirtyExpr -> Maybe (Expr Bool)
+parseBool (DirtyEquals e1 e2) = Equals <$> parseInt e1 <*> parseInt e2
+parseBool (DirtyAdd _ _) = Nothing
+parseBool (DirtyIf tst t f) = If <$> parseBool tst <*> parseBool t <*> parseBool f
+parseBool (DirtyIntValue _) = Nothing
+parseBool (DirtyBoolValue b) = Just $ BoolValue b
 
 -- | c. Can we add functions to our 'Expr' language? If not, why not? What
 -- other constructs would we need to add? Could we still avoid 'Maybe' in the
 -- 'eval' function?
 
+-- to add functions, we could add the following cases to the Expr gadt
 
+data LamExpr a where
+  Lam :: (a -> b) -> LamExpr (a -> b)
+  App :: LamExpr (a -> b) -> a -> LamExpr b
 
+-- and avoid Maybe in the evaluator by augmenting eval with
+
+evalLam :: LamExpr a -> a
+evalLam (Lam f) = f
+evalLam (App f a) = evalLam f a
 
 
 {- TEN -}
@@ -353,13 +382,22 @@ parse = error "Implement me"
 -- long as the input of one lines up with the output of the next.
 
 data TypeAlignedList a b where
-  -- ...
+  Id :: TypeAlignedList a a
+  Fn :: (a -> b) -> TypeAlignedList b c -> TypeAlignedList a c
 
 -- | b. Which types are existential?
+
+-- all of the types in the "middle" of the composition chain
 
 -- | c. Write a function to append type-aligned lists. This is almost certainly
 -- not as difficult as you'd initially think.
 
 composeTALs :: TypeAlignedList b c -> TypeAlignedList a b -> TypeAlignedList a c
-composeTALs = error "Implement me, and then celebrate!"
+composeTALs Id Id = Id
+composeTALs Id tal = tal
+composeTALs tal Id = tal
+composeTALs bc (Fn aa' a'b) = Fn aa' $ composeTALs bc a'b
 
+pipe :: TypeAlignedList a b -> a -> b
+pipe Id a = a
+pipe (Fn f tal) a = pipe tal (f a)
