@@ -1,3 +1,5 @@
+{-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE GADTs #-}
 module Exercises where
 
@@ -237,11 +239,16 @@ data Branch left centre right
 -- /tree/. None of the variables should be existential.
 
 data HTree a where
+  HTEmpty :: HTree Empty
+  HTBranch :: HTree l -> c -> HTree r -> HTree (Branch l c r)
   -- ...
 
 -- | b. Implement a function that deletes the left subtree. The type should be
 -- strong enough that GHC will do most of the work for you. Once you have it,
 -- try breaking the implementation - does it type-check? If not, why not?
+
+deleteLeft :: HTree (Branch l c r) -> HTree (Branch Empty c r)
+deleteLeft (HTBranch l c r) = HTBranch HTEmpty c r
 
 -- | c. Implement 'Eq' for 'HTree's. Note that you might have to write more
 -- than one to cover all possible HTrees. You might also need an extension or
@@ -249,8 +256,11 @@ data HTree a where
 -- Recursion is your friend here - you shouldn't need to add a constraint to
 -- the GADT!
 
+instance Eq (HTree Empty) where
+  ht1 == ht2 = True
 
-
+instance (Eq (HTree l), Eq c, Eq (HTree r)) => Eq (HTree (Branch l c r)) where
+  (HTBranch l c r) == (HTBranch l' c' r') = l == l' && c == c' && r == r'
 
 
 {- EIGHT -}
@@ -264,21 +274,29 @@ data HTree a where
 -- @
 
 data AlternatingList a b where
-  -- ...
+  AltCons :: a -> AlternatingList b a -> AlternatingList a b
+  AltNil :: AlternatingList a b
 
 -- | b. Implement the following functions.
 
 getFirsts :: AlternatingList a b -> [a]
-getFirsts = error "Implement me!"
+getFirsts (AltCons a (AltCons _ abs)) = a : getFirsts abs
+getFirsts (AltCons a AltNil) = a : []
+getFirsts AltNil = []
 
 getSeconds :: AlternatingList a b -> [b]
-getSeconds = error "Implement me, too!"
+getSeconds (AltCons _ (AltCons b abs)) = b : getSeconds abs
+getSeconds (AltCons _ AltNil) = []
+getSeconds AltNil = []
 
 -- | c. One more for luck: write this one using the above two functions, and
 -- then write it such that it only does a single pass over the list.
 
 foldValues :: (Monoid a, Monoid b) => AlternatingList a b -> (a, b)
-foldValues = error "Implement me, three!"
+foldValues abs = go abs (mempty, mempty)
+  where go AltNil r = r
+        go (AltCons a (AltCons b abs)) (as, bs) = go abs (a <> as, b <> bs)
+        go (AltCons a AltNil) (as, bs) = (a <> as, bs)
 
 
 
