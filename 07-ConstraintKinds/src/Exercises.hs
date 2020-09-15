@@ -1,3 +1,4 @@
+{-# LANGUAGE UndecidableInstances #-}
 {-# LANGUAGE ConstraintKinds #-}
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE FlexibleInstances #-}
@@ -34,13 +35,16 @@ data List a = Nil | Cons a (List a)
 -- constraints can the @Nil@ case satisfy?
 
 data ConstrainedList (c :: Type -> Constraint) where
-  -- IMPLEMENT ME
+  CNil :: ConstrainedList c
+  CCons :: (c a) => a -> ConstrainedList c -> ConstrainedList c
 
 -- | b. Using what we know about RankNTypes, write a function to fold a
 -- constrained list. Note that we'll need a folding function that works /for
 -- all/ types who implement some constraint @c@. Wink wink, nudge nudge.
 
--- foldConstrainedList :: ???
+foldConstrainedList :: Monoid b => (forall a. (c a) => a -> b) -> ConstrainedList c -> b
+foldConstrainedList f CNil = mempty
+foldConstrainedList f (CCons a as) = f a <> foldConstrainedList f as
 
 -- | Often, I'll want to constrain a list by /multiple/ things. The problem is
 -- that I can't directly write multiple constraints into my type, because the
@@ -54,11 +58,16 @@ data ConstrainedList (c :: Type -> Constraint) where
 -- combines `Monoid a` and `Show a`. What other extension did you need to
 -- enable? Why?
 
--- class ??? => Constraints a
--- instance ??? => Constraints a
+class (Show a, Monoid a) => Constraints a
+instance (Show a, Monoid a) => Constraints a
+
+-- we need undecidable instances because the instance choice depends on the left
+-- side of the fat arrow, and can't be decided simply by the type.
 
 -- | What can we now do with this constrained list that we couldn't before?
 -- There are two opportunities that should stand out!
+
+-- we can show it.
 
 
 
@@ -81,8 +90,21 @@ data HList (xs :: [Type]) where
 -- | a. Write this fold function. I won't give any hints to the definition, but
 -- we will probably need to call it like this:
 
--- test :: ??? => HList xs -> String
--- test = fold (TCProxy :: TCProxy Show) show
+type family Constrained (c :: Type -> Constraint) (xs :: [Type]) :: Constraint where
+  Constrained _ '[] = ()
+  Constrained c (x ': xs) = (c x , Constrained c xs )
+
+data CProxy (c :: Type -> Constraint) = CProxy
+
+hFold :: (Monoid b, Constrained c xs)
+      => CProxy c
+      -> (forall a. c a => a -> b)
+      -> HList (xs :: [Type]) -> b
+hFold _ _ HNil = mempty
+hFold cp@CProxy f (HCons a as) = f a <> hFold cp f as
+
+test :: (Constrained Show xs) => HList xs -> String
+test = hFold (CProxy :: CProxy Show) show
 
 -- | b. Why do we need the proxy to point out which constraint we're working
 -- with?  What does GHC not like if we remove it?
@@ -101,3 +123,6 @@ f :: a ~ b => a -> b
 f = id
 
 -- | Write @foldMap@ for @HList@!
+hFoldMap :: (Constrained ((~) a) xs, Monoid b) => (a -> b) -> HList xs -> b
+hFoldMap _ HNil = mempty
+hFoldMap f (HCons a as) = f a <> hFoldMap f as
