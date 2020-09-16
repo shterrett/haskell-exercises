@@ -16,12 +16,14 @@ import GHC.TypeLits (Symbol)
 
 -- | Let's look at the following type family to build a constraint:
 
-type family All (c :: Type -> Constraint) (xs :: [Type]) :: Constraint where
+type family All (c :: t -> Constraint) (xs :: [t]) :: Constraint where
   All c '[] = ()
   All c (x ': xs) = (c x, All c xs)
 
 -- | a. Why does it have to be restricted to 'Type'? Can you make this more
 -- general?
+
+-- yes
 
 -- | b. Why does it have to be restricted to 'Constraint'? Can you make this
 -- more general? Why is this harder?
@@ -60,23 +62,31 @@ f (Tagged x) = putStrLn (show x <> " is important!")
 
 -- | b. Can we generalise 'Type'? If so, how? If not, why not?
 
+-- No, the `a :: Type` is used in the value constructor, and so must be of type
+-- `Type`
+
 -- | c. Often when we use the 'Tagged' type, we prefer a sum type (promoted
 -- with @DataKinds@) over strings. Why do you think this might be?
 
+data Importance = Very | Not
 
+data STagged (importance :: Importance) (a :: Type) = STagged a
 
+-- Guarantees that we only have a statically known number of variants we have to
+-- handle
 
 
 {- THREE -}
 
 -- | We can use the following to test type-level equivalence.
 
-data a :=: b where
+data (a :: k) :=: (b :: k) :: l where
   Refl :: a :=: a
 
--- | a. What do you think the kind of (:=:) is?
+-- | a. What do you think the kind of (:=:) is? Type -> Type -> Type
 
--- | b. Does @PolyKinds@ make a difference to this kind?
+-- | b. Does @PolyKinds@ make a difference to this kind? Yes, it's k -> k ->
+-- Type
 
 -- | c. Regardless of your answer to part (b), is this the most general kind we
 -- could possibly give this constructor? If not (hint: it's not), what more
