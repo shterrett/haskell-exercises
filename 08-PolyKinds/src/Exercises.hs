@@ -1,3 +1,4 @@
+{-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE DataKinds     #-}
 {-# LANGUAGE GADTs         #-}
 {-# LANGUAGE PolyKinds     #-}
@@ -5,6 +6,7 @@
 {-# LANGUAGE TypeOperators #-}
 module Exercises where
 
+import Data.Maybe (mapMaybe)
 import Data.Kind    (Constraint, Type)
 import GHC.TypeLits (Symbol)
 
@@ -80,7 +82,7 @@ data STagged (importance :: Importance) (a :: Type) = STagged a
 
 -- | We can use the following to test type-level equivalence.
 
-data (a :: k) :=: (b :: k) :: l where
+data (a :: k) :=: (b :: k) :: Type where
   Refl :: a :=: a
 
 -- | a. What do you think the kind of (:=:) is? Type -> Type -> Type
@@ -93,7 +95,7 @@ data (a :: k) :=: (b :: k) :: l where
 -- general kind could we give it, and how would we tell this to GHC?
 
 
-
+-- No idea
 
 
 {- FOUR -}
@@ -118,7 +120,7 @@ data SBool (b :: Bool) where
   STrue  :: SBool 'True
   SFalse :: SBool 'False
 
--- type instance Sing ...
+type instance Sing (x :: Bool) = SBool x
 
 -- | b. Repeat the process for the @Nat@ kind. Again, if you're on the right
 -- lines, this is very nearly a copy-paste job!
@@ -129,8 +131,7 @@ data SNat (n :: Nat) where
   SZ :: SNat 'Z
   SS :: SNat n -> SNat ('S n)
 
-
-
+type instance Sing (n :: Nat) = SNat n
 
 
 {- FIVE -}
@@ -150,19 +151,19 @@ data Strings (n :: Nat) where
 -- n@ and an @SNat n@ into @Sigma Strings@, existentialising the actual length.
 --
 -- @
---   example :: [Sigma Strings]
---   example
---     = [ Sigma         SZ   SNil
---       , Sigma     (SS SZ)  ("hi" :> SNil)
---       , Sigma (SS (SS SZ)) ("hello" :> ("world" :> SNil))
---       ]
+example :: [Sigma SNat Strings]
+example
+  = [ Sigma         SZ   SNil
+    , Sigma     (SS SZ)  ("hi" :> SNil)
+    , Sigma (SS (SS SZ)) ("hello" :> ("world" :> SNil))
+    ]
 -- @
 
 -- | a. Write this type's definition: If you run the above example, the
 -- compiler should do a lot of the work for you...
 
-data Sigma (f :: Nat -> Type) where
-  -- Sigma :: ... -> Sigma f
+data Sigma (g :: k -> Type) (f :: k -> Type) where
+  Sigma :: g n -> f n -> Sigma g f
 
 -- | b. Surely, by now, you've guessed this question? Why are we restricting
 -- ourselves to 'Nat'? Don't we have some more general way to talk about
@@ -176,9 +177,13 @@ data Vector (a :: Type) (n :: Nat) where -- @n@ and @a@ flipped... Hmm, a clue!
   VNil  ::                    Vector a  'Z
   VCons :: a -> Vector a n -> Vector a ('S n)
 
-
-
-
+filterV :: (a -> Bool) -> Sigma SNat (Vector a) -> Sigma SNat (Vector a)
+filterV _ (Sigma z VNil) = Sigma z VNil
+filterV p (Sigma (SS n) (VCons a as)) =
+  if p a
+    then case filterV p (Sigma n as) of
+           Sigma n' v -> Sigma (SS n') (VCons a v)
+    else filterV p $ Sigma n as
 
 
 {- SIX -}
@@ -207,17 +212,33 @@ data ServerData
 -- server data.
 
 data Communication (label :: Label) where
-  -- {{Fill this space with your academic excellence}}
+  FromClient :: ClientData -> Communication Client
+  FromServer :: ServerData -> Communication Server
 
 -- | b. Write a singleton for 'Label'.
+
+data SLabel (l :: Label) where
+  SClient :: SLabel Client
+  SServer :: SLabel Server
 
 -- | c. Magically, we can now group together blocks of data with differing
 -- labels using @Sigma Communication@, and then pattern-match on the 'Sigma'
 -- constructor to find out which packet we have! Try it:
 
--- serverLog :: [Sigma Communication] -> [ServerData]
--- serverLog = error "YOU CAN DO IT"
+serverLog :: [Sigma SLabel Communication] -> [ServerData]
+serverLog = mapMaybe $ \case
+                         Sigma SServer (FromServer sd) -> Just sd
+                         _ -> Nothing
 
 -- | d. Arguably, in this case, the Sigma type is overkill; what could we have
 -- done, perhaps using methods from previous chapters, to "hide" the label
 -- until we pattern-matched?
+
+data HiddenComms where
+  FromClient' :: ClientData -> HiddenComms
+  FromServer' :: ServerData -> HiddenComms
+
+serverLog' :: [HiddenComms] -> [ServerData]
+serverLog' = mapMaybe $ \case
+                          FromClient' _ -> Nothing
+                          FromServer' sd -> Just sd
