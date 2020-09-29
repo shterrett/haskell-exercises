@@ -1,3 +1,9 @@
+{-# LANGUAGE StandaloneDeriving #-}
+{-# LANGUAGE UndecidableInstances #-}
+{-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE TypeApplications #-}
+{-# LANGUAGE AllowAmbiguousTypes #-}
+{-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE ConstraintKinds #-}
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE DeriveFunctor #-}
@@ -14,7 +20,10 @@ module Exercises where
 
 import Data.Kind (Constraint, Type)
 import Data.Map (Map)
+import qualified Data.Map as Map
 import Data.Proxy (Proxy (..))
+import GHC.TypeLits (TypeError, ErrorMessage(Text))
+import Data.Foldable (toList)
 
 
 
@@ -34,14 +43,25 @@ newtype YourInt = YourInt Int
 
 -- | a. Write the class!
 
--- class Newtype ... ... where
---   wrap   :: ...
---   unwrap :: ...
+class Newtype (nt :: Type) (t :: Type) where
+  wrap   :: Proxy t -> t -> nt
+  unwrap :: nt -> t
 
 -- | b. Write instances for 'MyInt' and 'YourInt'.
 
+instance Newtype MyInt Int where
+  wrap _ = MyInt
+  unwrap (MyInt x) = x
+
+instance Newtype YourInt Int where
+  wrap _ = YourInt
+  unwrap (YourInt x) = x
+
 -- | c. Write a function that adds together two values of the same type,
 -- providing that the type is a newtype around some type with a 'Num' instance.
+
+sum :: forall a b. (Newtype a b, Num b) => a -> a -> a
+sum x y = wrap (Proxy @b) $ unwrap x + unwrap y
 
 -- | d. We actually don't need @MultiParamTypeClasses@ for this if we use
 -- @TypeFamilies@. Look at the section on associated type instances here:
@@ -49,8 +69,18 @@ newtype YourInt = YourInt Int
 -- rewrite the class using an associated type, @Old@, to indicate the
 -- "unwrapped" type. What are the signatures of 'wrap' and 'unwrap'?
 
+class NewNewtype (nt :: Type) where
+  type Old nt
+  nwrap :: Old nt -> nt
+  nunwrap :: nt -> Old nt
 
+instance NewNewtype MyInt where
+  type Old MyInt = Int
+  nwrap = MyInt
+  nunwrap (MyInt x) = x
 
+sum' :: (NewNewtype nt, Num (Old nt)) => nt -> nt -> nt
+sum' x y = nwrap $ nunwrap x + nunwrap y
 
 
 {- TWO -}
@@ -81,14 +111,27 @@ instance Traversable Identity where
 -- | a. Write that little dazzler! What error do we get from GHC? What
 -- extension does it suggest to fix this?
 
--- class Wanderable … … where
---   wander :: … => (a -> f b) -> t a -> f (t b)
+class Wanderable (t :: Type -> Type) (c :: (Type -> Type) -> Constraint) where
+  wander :: (c f) => Proxy c ->  (a -> f b) -> t a -> f (t b)
 
 -- | b. Write a 'Wanderable' instance for 'Identity'.
+
+instance Wanderable Identity Functor where
+  wander _ f (Identity a) = Identity <$> f a
 
 -- | c. Write 'Wanderable' instances for 'Maybe', '[]', and 'Proxy', noting the
 -- differing constraints required on the @f@ type. '[]' might not work so well,
 -- and we'll look at /why/ in the next part of this question!
+
+instance Wanderable Maybe Applicative where
+  wander _ f (Just a) = Just <$> f a
+  wander _ _ Nothing = pure Nothing
+
+instance Wanderable Proxy Applicative where
+  wander _ f Proxy = pure Proxy
+
+instance Wanderable [] Applicative where
+  wander _ f as = sequenceA $ f <$> as
 
 -- | d. Assuming you turned on the extension suggested by GHC, why does the
 -- following produce an error? Using only the extensions we've seen so far, how
@@ -97,11 +140,8 @@ instance Traversable Identity where
 -- we'll see in later chapters that there are neater solutions to this
 -- problem!)
 
--- test = wander Just [1, 2, 3]
-
-
-
-
+test :: Maybe [Int]
+test = wander (Proxy @Applicative) Just [1, 2, 3]
 
 {- THREE -}
 
@@ -124,18 +164,24 @@ data Fin (limit :: Nat) where
 
 class (x :: Nat) < (y :: Nat) where
   convert :: SNat x -> Fin y
+  unconvert :: Fin y -> SNat x
 
 -- | a. Write the instance that says @Z@ is smaller than @S n@ for /any/ @n@.
+
+instance 'Z < ('S n) where
+  convert SZ = FZ
+  unconvert FZ = SZ
+
 
 -- | b. Write an instance that says, if @x@ is smaller than @y@, then @S x@ is
 -- smaller than @S y@.
 
+instance ((x :: Nat) < (y :: Nat)) => ('S x) < ('S y) where
+  convert (SS x) = FS $ convert x
+  unconvert (FS y) = SS $ unconvert y
+
 -- | c. Write the inverse function for the class definition and its two
 -- instances.
-
-
-
-
 
 {- FOUR -}
 
@@ -145,7 +191,17 @@ class (x :: Nat) < (y :: Nat) where
 
 -- | a. Write that typeclass!
 
+class Equal x y where
+  refl :: ()
+  from :: x -> y
+  to :: y -> x
+
 -- | b. Write that instance!
+
+instance Equal x x where
+  refl = ()
+  from = Prelude.id
+  to = Prelude.id
 
 -- | c. When GHC sees @x ~ y@, it can apply anything it knows about @x@ to @y@,
 -- and vice versa. We don't have the same luxury with /our/ class, however –
@@ -158,15 +214,25 @@ class (x :: Nat) < (y :: Nat) where
 -- the same? Perhaps with a second instance? Which pragma(s) do we need and
 -- why? Can we even solve this?
 
-
-
-
+instance (Equal x y, Equal y z) => Equal x z where
+  refl = ()
+  from x = from @y @z $ from @x @y x
+  to z = to @x @y $ to @y @z z
 
 {- FIVE -}
 
 -- | It wouldn't be a proper chapter without an @HList@, would it?
 
 data HList (xs :: [Type]) where
+  HNil :: HList '[]
+  HCons :: x -> HList xs -> HList (x ': xs)
+
+instance Show (HList '[]) where
+  show HNil = "]["
+
+instance (Show x, Show (HList xs)) => Show (HList (x ': xs)) where
+  show (HCons x xs) = show x <> " : " <> show xs
+
   -- In fact, you know what? You can definitely write an HList by now – I'll
   -- just put my feet up and wait here until you're done!
 
@@ -178,14 +244,22 @@ class HTake (n :: Nat) (xs :: [Type]) (ys :: [Type]) where
 
 -- | a. Write an instance for taking 0 elements.
 
+instance HTake 'Z xs xs where
+  htake SZ xs = xs
+
 -- | b. Write an instance for taking a non-zero number. You "may" need a
 -- constraint on this instance.
 
+type family Take (n :: Nat) (xs :: [Type]) :: [Type] where
+  Take 'Z _ = '[]
+  Take ('S _) '[] = TypeError (Text "Tried to take too many things")
+  Take ('S n) (x ': xs) = x ': Take n xs
+
+instance (ys ~ Take n xs) => HTake n xs ys where
+  htake SZ _ = HNil
+  htake (SS n) (HCons x xs) = HCons x $ htake n xs
+
 -- | c. What case have we forgotten? How might we handle it?
-
-
-
-
 
 {- SIX -}
 
@@ -196,7 +270,13 @@ class Pluck (x :: Type) (xs :: [Type]) where
 
 -- | a. Write an instance for when the head of @xs@ is equal to @x@.
 
+instance Pluck x (x ': xs) where
+  pluck (HCons x xs) = x
+
 -- | b. Write an instance for when the head /isn't/ equal to @x@.
+
+instance {-# OVERLAPPABLE #-} (Pluck x xs) => Pluck x (y ': xs) where
+  pluck (HCons _ xs) = pluck @x @xs xs
 
 -- | c. Using [the documentation for user-defined type
 -- errors](http://hackage.haskell.org/package/base-4.11.1.0/docs/GHC-TypeLits.html#g:4)
@@ -204,12 +284,17 @@ class Pluck (x :: Type) (xs :: [Type]) where
 -- through the entire @xs@ list (or started with an empty @HList@) and haven't
 -- found the type you're trying to find.
 
+instance (TypeError (Text "type not in list")) => Pluck x '[] where
+  pluck = undefined
+
 -- | d. Making any changes required for your particular HList syntax, why
 -- doesn't the following work? Hint: try running @:t 3@ in GHCi.
 
 -- mystery :: Int
 -- mystery = pluck (HCons 3 HNil)
 
+-- Because 3 is (Num a) => a.
+-- solved = pluck @Int (HCons (3 :: Int) HNil) works
 
 
 
@@ -226,21 +311,28 @@ class Pluck (x :: Type) (xs :: [Type]) where
 -- | a. Write the 'Variant' type to make the above example compile.
 
 data Variant (xs :: [Type]) where
-  -- Here  :: ...
-  -- There :: ...
+  Here :: x -> Variant (x ': xs)
+  There :: Variant ys -> Variant (x ': ys)
 
 -- | b. The example is /fine/, but there's a lot of 'Here'/'There' boilerplate.
 -- Wouldn't it be nice if we had a function that takes a type, and then returns
 -- you the value in the right position? Write it! If it works, the following
 -- should compile: @[inject True, inject (3 :: Int), inject "hello"]@.
 
--- class Inject … … where
---   inject :: …
+class Inject x xs where
+  inject :: x -> Variant xs
+
+instance Inject x (x ': xs) where
+  inject x = Here x
+
+instance {-# OVERLAPPABLE #-} (Inject x xs) => Inject x (y ': xs) where
+  inject x = There $ inject x
 
 -- | c. Why did we have to annotate the 3? This is getting frustrating... do
 -- you have any (not necessarily good) ideas on how we /could/ solve it?
 
-
+-- Because everything is inferred as polymorphically as possible.
+-- We could always newtype it :/
 
 
 
@@ -279,13 +371,13 @@ class Coat (a :: Weather) (b :: Temperature) where
 instance Coat Sunny b where doINeedACoat _ _ = False
 
 -- It's freezing out there - put a coat on!
-instance Coat a Cold where doINeedACoat _ _ = True
+instance {-# INCOHERENT #-} Coat a Cold where doINeedACoat _ _ = True
 
 -- | Several months pass, and your app is used by billions of people around the
 -- world. All of a sudden, your engineers encounter a strange error:
 
--- test :: Bool
--- test = doINeedACoat SSunny SCold
+test2 :: Bool
+test2 = doINeedACoat SSunny SCold
 
 -- | Clearly, our data scientists never thought of a day that could
 -- simultaneously be sunny /and/ cold. After months of board meetings, a
@@ -296,13 +388,15 @@ instance Coat a Cold where doINeedACoat _ _ = True
 -- to prioritise the second rule. Why didn't that work? Which step of the
 -- instance resolution process is causing the failure?
 
+-- the instance head is the problem; not the constraint.
+
 -- | b. Consulting the instance resolution steps, which pragma /could/ we use
 -- to solve this problem? Fix the problem accordingly.
 
 -- | c. In spite of its scary name, can we verify that our use of it /is/
 -- undeserving of the first two letters of its name?
 
-
+-- for now, because we know there are only two instanves.
 
 
 
@@ -316,16 +410,27 @@ instance Coat a Cold where doINeedACoat _ _ = True
 
 -- | a. Are these in conflict? When?
 
+-- precisely when a is a String, because [Char] is [a]
+
 -- | b. Let's say we want to define an instance for any @f a@ where the @f@ is
 -- 'Foldable', by converting our type to a list and then showing that. Is there
 -- a pragma we can add to the first 'Show' instance above so as to preserve
 -- current behaviour? Would we need /more/ pragmas than this?
+
+instance {-# INCOHERENT #-} (Foldable f, Show a) => Show (f a) where
+  show = toList . show
+
+str :: String
+str = show $ Map.singleton 1 4
 
 -- | c. Somewhat confusingly, we've now introduced incoherence: depending on
 -- whether or not I've imported this module, 'show' will behave in different
 -- ways. Your colleague suggests that your use of pragmas is the root issue
 -- here, but they are missing the bigger issue; what have we done? How could we
 -- have avoided it?
+--
+-- created two instances that are indistinguishable. We could use a newtype for
+-- anything foldable we want to show. Or not import Prelude
 
 
 
@@ -371,12 +476,25 @@ class CommentCache where
 -- | a. What are those three ways? Could we turn them into parameters to a
 -- typeclass? Do it!
 
+class Cache (item :: Type) (itemId :: Type) (return :: Type -> Type) where
+  store :: item -> Map itemId item -> Map itemId item
+  load :: Map itemId item -> itemId -> return item
+
 -- | b. Write instances for 'User' and 'Comment', and feel free to implement
 -- them as 'undefined' or 'error'. Now, before uncommenting the following, can
 -- you see what will go wrong? (If you don't see an error, try to call it in
 -- GHCi...)
 
--- oops cache = load cache (UserId (123 :: Int))
+instance Cache User UserId (Either Status) where
+  store = undefined
+  load = undefined
+
+instance Cache Comment CommentId Maybe where
+  store = undefined
+  load = undefined
 
 -- | c. Do we know of a sneaky trick that would allow us to fix this? Possibly
 -- involving constraints? Try!
+
+oops cache = load @User @UserId @(Either Status) cache (UserId (123 :: Int))
+
